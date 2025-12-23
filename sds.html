@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blurred Sunny Yellow Ribbon Tree</title>
+    <style>
+        /* 纯黑背景 */
+        html, body { 
+            margin: 0; overflow: hidden; 
+            background-color: #000000 !important; 
+            height: 100%; font-family: 'Segoe UI', sans-serif; 
+        }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        /* UI colors updated to Sunny Yellow (FFD973) */
+        #ui-layer {
+            position: absolute; z-index: 10; width: 100%; height: 100%; pointer-events: none;
+            display: flex; justify-content: flex-end; padding: 30px; box-sizing: border-box;
+        }
+        .sidebar-container { 
+            text-align: right; color: #FFD973; text-shadow: 0 0 15px rgba(255, 217, 115, 0.5); 
+            display: flex; flex-direction: column; align-items: flex-end; gap: 25px; 
+            max-width: 240px; background: rgba(20, 15, 10, 0.7); backdrop-filter: blur(8px);
+            padding: 25px; border-radius: 20px; border: 1px solid rgba(255, 217, 115, 0.2);
+        }
+        h1 { margin: 0; font-weight: 300; font-size: 24px; letter-spacing: 2px; }
+        .btn-group { pointer-events: auto; display: flex; flex-direction: column; gap: 15px; width: 100%; }
+        .btn {
+            background: rgba(255, 255, 255, 0.05); color: #FFD973; border: 1px solid rgba(255, 217, 115, 0.3);
+            padding: 12px 20px; border-radius: 12px; font-size: 13px; cursor: pointer; text-transform: uppercase;
+            transition: all 0.4s ease; letter-spacing: 1px; width: 100%; box-sizing: border-box; text-align: center;
+        }
+        .btn:hover { background: rgba(255, 217, 115, 0.2); color: #fff; box-shadow: 0 0 30px rgba(255, 217, 115, 0.4); border-color: #FFD973; }
+        .upload-btn { background: rgba(255, 217, 115, 0.15); border-color: #FFD973; font-weight: bold; }
+        input[type="file"] { display: none; }
+        #loading {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 100;
+            display: flex; flex-direction: column; justify-content: center; align-items: center; color: #FFD973; letter-spacing: 4px; font-weight: 300;
+        }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+</head>
+<body>
+    <div id="loading"><div>WEAVING BLURRED RIBBON...</div></div>
+    <div id="canvas-container"></div>
+    <div id="ui-layer">
+        <div class="sidebar-container">
+            <h1>Sunny Soft Gold</h1>
+            <div class="btn-group">
+                <button class="btn upload-btn" onclick="document.getElementById('file-upload').click()">+ Upload Photos</button>
+                <input type="file" id="file-upload" multiple accept="image/*">
+            </div>
+            <div class="btn-group">
+                <button class="btn" onclick="window.manualState('TREE')">🎄 Tree Mode</button>
+                <button class="btn" onclick="window.manualState('SCATTER')">✨ Galaxy Mode</button>
+                <button class="btn" onclick="window.manualState('PHOTO')">📸 View Memories</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const CONFIG = {
+            particleCount: 15000, photoCount: 8, 
+            colors: [0xFFFFFF, 0xFFE082, 0xFFE082, 0x2E8B57, 0xDC143C], 
+        };
+        const STATE = { TREE: 'TREE', SCATTER: 'SCATTER', VIEW_PHOTO: 'VIEW_PHOTO' };
+        let currentState = STATE.TREE;
+        let scene, camera, renderer, controls;
+        let instancesMesh, photoMeshes = [];
+        let starMesh, starData; 
+        let trunkGroup; let ribbonMesh; let ribbonPath; 
+        let dummy = new THREE.Object3D();
+        let particlesData = []; let snowSystem;
+
+        window.manualState = function(s) { switchState(STATE[s]); };
+
+        function init() {
+            setTimeout(function() { const l = document.getElementById('loading'); if(l) l.remove(); }, 1500);
+            if (typeof THREE === 'undefined') { alert("Connect Error."); return; }
+            initThree();
+            createThickerTrunk(); 
+            createUniformParticles(); 
+            createBlurredSunnyRibbonAndPhotos(); // 修改：更亮一点且边缘模糊的金线
+            createGlowingStar(); 
+            createRefinedEnvironment();
+            initEvents(); animate();
+        }
+
+        function initThree() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            const pureBlack = new THREE.Color(0x000000); 
+            scene.background = pureBlack;
+            scene.fog = new THREE.FogExp2(pureBlack, 0.002); 
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 0, 65);
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+            renderer.setClearColor(pureBlack, 1);
+            container.appendChild(renderer.domElement);
+            
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.2); scene.add(ambientLight);
+            // 主灯光调整为阳光黄
+            const pointLight = new THREE.PointLight(0xFFD973, 1.2, 200); pointLight.position.set(20, 50, 50); scene.add(pointLight);
+            const bottomLight = new THREE.PointLight(0xA0522D, 0.8, 150); bottomLight.position.set(0, -50, 30); scene.add(bottomLight);
+
+            if (THREE.OrbitControls) {
+                controls = new THREE.OrbitControls(camera, renderer.domElement);
+                controls.enableDamping = true; controls.autoRotate = true; controls.autoRotateSpeed = 0.5;
+                controls.enableZoom = true; controls.maxPolarAngle = Math.PI / 2 + 0.1;
+            }
+        }
+
+        function createThickerTrunk() {
+            trunkGroup = new THREE.Group();
+            const barkMat = new THREE.MeshStandardMaterial({
+                color: 0xF0E0D0, roughness: 0.9, metalness: 0.0, flatShading: true
+            });
+            const stemGeo = new THREE.CylinderGeometry(0.5, 2.0, 65, 24);
+            const stemMesh = new THREE.Mesh(stemGeo, barkMat);
+            stemMesh.position.y = -7.5; 
+            trunkGroup.add(stemMesh);
+            scene.add(trunkGroup);
+        }
+
+        // 🌟 新增：创建边缘模糊的渐变纹理
+        function createBlurryEdgeTexture() {
+            const size = 256;
+            const canvas = document.createElement('canvas');
+            canvas.width = size; canvas.height = size;
+            const ctx = canvas.getContext('2d');
+
+            // 创建垂直渐变：两边透明(黑)，中间不透明(白)
+            // TubeGeometry 的 V 坐标是环绕管子一圈的
+            const gradient = ctx.createLinearGradient(0, 0, 0, size);
+            gradient.addColorStop(0, 'rgba(0,0,0,0)');   // 边缘透明
+            gradient.addColorStop(0.2, 'rgba(255,255,255,1)'); // 中间实体
+            gradient.addColorStop(0.8, 'rgba(255,255,255,1)');
+            gradient.addColorStop(1, 'rgba(0,0,0,0)');   // 边缘透明
+
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, size, size);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            return texture;
+        }
+
+        // --- 核心修改：更亮一点且边缘模糊的金线 ---
+        function createBlurredSunnyRibbonAndPhotos() {
+            const points = [];
+            const turns = 3.5; 
+            const heightSpan = 47; 
+            const startY = 25; 
+            const steps = 300;
+            
+            for ( let i = 0; i <= steps; i ++ ) {
+                const t = i / steps; 
+                const angle = t * Math.PI * 2 * turns;
+                const radius = 0.5 + t * 24 + Math.sin(t*Math.PI*5)*1.5; 
+                points.push( new THREE.Vector3( Math.cos( angle ) * radius, startY - t * heightSpan, Math.sin( angle ) * radius ) );
+            }
+            ribbonPath = new THREE.CatmullRomCurve3( points );
+
+            const tubeGeo = new THREE.TubeGeometry( ribbonPath, 400, 0.25, 12, false ); 
+            
+            // 🌟 获取模糊纹理
+            const blurTexture = createBlurryEdgeTexture();
+
+            // 🌟 修改：阳光黄材质 + 边缘模糊 AlphaMap
+            const ribbonMat = new THREE.MeshStandardMaterial({
+                color: 0xFFD973, // 阳光黄 (比鹅黄稍亮稍暖)
+                metalness: 0.2,  
+                roughness: 0.6,  
+                emissive: 0xFFD973, 
+                emissiveIntensity: 0.6, // 🌟 亮度提升至 0.6 (之前是0.4)
+                transparent: true, 
+                opacity: 0.95, // 主体稍微更实一点，靠贴图做透明过渡
+                alphaMap: blurTexture, // 🌟 应用模糊贴图到透明通道
+                side: THREE.DoubleSide,
+                depthWrite: false // 避免自身遮挡错误，增强柔和感
+            });
+            ribbonMesh = new THREE.Mesh( tubeGeo, ribbonMat );
+            scene.add( ribbonMesh );
+
+            // --- 照片处理 (同步颜色) ---
+            const geo = new THREE.PlaneGeometry(4.8, 5.8);
+            geo.translate(0, -2.9, 0); 
+
+            const createBrightTex = function(txt) {
+                const cvs = document.createElement('canvas'); cvs.width=480; cvs.height=580; const ctx = cvs.getContext('2d');
+                const gradient = ctx.createLinearGradient(0,0,480,580); gradient.addColorStop(0, '#FFD973'); gradient.addColorStop(1, '#C8B060');
+                ctx.fillStyle = gradient; ctx.fillRect(0,0,480,580);
+                ctx.fillStyle='#FFFFFF'; ctx.fillRect(20,20,440,540); ctx.fillStyle='#DDD'; ctx.fillRect(40,40,400,400); 
+                ctx.fillStyle='#C8B060'; ctx.font='bold 38px Georgia'; ctx.textAlign='center'; ctx.fillText(txt, 240, 500);
+                return new THREE.CanvasTexture(cvs);
+            }
+
+            for (let i = 0; i < CONFIG.photoCount; i++) {
+                const mat = new THREE.MeshStandardMaterial({ 
+                    map: createBrightTex('Memory ' + (i+1)), side: THREE.DoubleSide,
+                    roughness: 0.5, metalness: 0.4, emissive: 0xFFFFFF, emissiveIntensity: 0.6 
+                });
+                const mesh = new THREE.Mesh(geo, mat);
+                
+                const t = 0.1 + (i / (CONFIG.photoCount - 1)) * 0.75; 
+                const treePos = ribbonPath.getPointAt(t);
+                const scatterPos = new THREE.Vector3((Math.random()-0.5)*80, (Math.random()-0.5)*80, (Math.random()-0.5)*50);
+                
+                particlesData.push({ isPhoto: true, mesh: mesh, photoMat: mat, currentPos: treePos.clone(), treePos: treePos, scatterPos: scatterPos });
+                mesh.position.copy(treePos); scene.add(mesh); photoMeshes.push(mesh);
+            }
+        }
+
+        function createRefinedEnvironment() {
+            const snowGeo = new THREE.BufferGeometry();
+            const snowCount = 300; 
+            const snowPos = new Float32Array(snowCount * 3); const snowVel = [];
+            for(let i=0; i<snowCount; i++) {
+                snowPos[i*3] = (Math.random()-0.5) * 180; snowPos[i*3+1] = Math.random() * 120 - 60; snowPos[i*3+2] = (Math.random()-0.5) * 180; 
+                snowVel.push({ y: -0.03 - Math.random() * 0.05 });
+            }
+            snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPos, 3));
+            // 雪花同步阳光黄
+            const snowMat = new THREE.PointsMaterial({ color: 0xFFD973, size: 0.4, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false });
+            snowSystem = new THREE.Points(snowGeo, snowMat); snowSystem.userData.velocities = snowVel; scene.add(snowSystem);
+        }
+
+        // --- 保持五角星的高亮璀璨 ---
+        function createGlowingStar() {
+            const shape = new THREE.Shape(); const points = 5; const outerRadius = 2.2; const innerRadius = 1.1; 
+            for (let i = 0; i < points * 2; i++) {
+                const angle = (i * Math.PI) / points; const radius = i % 2 === 0 ? outerRadius : innerRadius;
+                const x = Math.cos(angle) * radius; const y = Math.sin(angle) * radius; if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
+            } shape.closePath();
+            const extrudeSettings = { steps: 1, depth: 0.6, bevelEnabled: true, bevelThickness: 0.15, bevelSize: 0.15, bevelSegments: 2 };
+            const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings); geometry.center(); 
+            const material = new THREE.MeshStandardMaterial({ 
+                color: 0xFFD700, metalness: 0.8, roughness: 0.2, 
+                emissive: 0xFFD700, emissiveIntensity: 5.0 
+            });
+            starMesh = new THREE.Mesh(geometry, material);
+            const treePos = new THREE.Vector3(0, 26, 0); const scatterPos = new THREE.Vector3(0, 85, 0);
+            starData = { currentPos: treePos.clone(), treePos: treePos, scatterPos: scatterPos };
+            starMesh.position.copy(treePos); starMesh.rotation.z = Math.PI / 10; scene.add(starMesh);
+        }
+
+        // --- 保持粒子的极致璀璨 ---
+        function createUniformParticles() {
+            const geometry = new THREE.SphereGeometry(0.12, 8, 8);
+            const material = new THREE.MeshBasicMaterial({ 
+                color: 0xffffff, transparent: true, opacity: 1.0, 
+                blending: THREE.AdditiveBlending, depthWrite: false 
+            });
+            instancesMesh = new THREE.InstancedMesh(geometry, material, CONFIG.particleCount);
+            const colorHelper = new THREE.Color();
+            for (let i = 0; i < CONFIG.particleCount; i++) {
+                const h = 48; const y = (i / CONFIG.particleCount) * h - h/2; const progress = (y + h/2) / h; 
+                const baseRadius = (1 - progress) * 17; const rOffset = 0.6 + Math.random() * 0.7; 
+                const radius = baseRadius * rOffset; const angle = i * 0.25 + Math.random() * 0.3; 
+                const treePos = new THREE.Vector3(Math.cos(angle) * radius, y, Math.sin(angle) * radius);
+                const scatterPos = new THREE.Vector3((Math.random()-0.5) * 100, (Math.random()-0.5) * 100, (Math.random()-0.5) * 80);
+                colorHelper.setHex(CONFIG.colors[Math.floor(Math.random() * CONFIG.colors.length)]);
+                instancesMesh.setColorAt(i, colorHelper);
+                particlesData.push({ currentPos: treePos.clone(), treePos: treePos, scatterPos: scatterPos, scale: Math.random() * 0.6 + 0.4, blinkSpeed: Math.random() * 2 + 1, blinkPhase: Math.random() * Math.PI });
+                dummy.position.copy(treePos); dummy.updateMatrix(); instancesMesh.setMatrixAt(i, dummy.matrix);
+            }
+            instancesMesh.instanceMatrix.needsUpdate = true; instancesMesh.instanceColor.needsUpdate = true; scene.add(instancesMesh);
+        }
+
+        function initEvents() {
+            document.getElementById('file-upload').addEventListener('change', function(e) {
+                const files = e.target.files; if (!files.length) return; let fileIdx = 0;
+                particlesData.forEach(function(p) {
+                    if (!p.isPhoto) return;
+                    if (fileIdx >= files.length) fileIdx = 0; const reader = new FileReader();
+                    reader.onload = function(evt) {
+                        const img = new Image(); img.onload = function() { 
+                            const tex = new THREE.Texture(img); tex.needsUpdate = true; 
+                            p.photoMat.map = tex; 
+                            p.photoMat.emissive = new THREE.Color(0xFFFFFF); p.photoMat.emissiveIntensity = 0.8;
+                            p.photoMat.needsUpdate = true; 
+                        }; img.src = evt.target.result;
+                    }; reader.readAsDataURL(files[fileIdx]); fileIdx++;
+                }); alert("Memories Uploaded!"); switchState(STATE.SCATTER); 
+            });
+            window.addEventListener('resize', function() { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+        }
+
+        function switchState(newState) {
+            if (currentState === newState) return; currentState = newState;
+            particlesData.forEach(function(p) {
+                const target = (newState === STATE.TREE) ? p.treePos : p.scatterPos; const duration = (newState === STATE.TREE) ? 2.0 : 2.8; const ease = (newState === STATE.TREE) ? "elastic.out(0.6, 0.4)" : "power2.inOut"; 
+                gsap.to(p.currentPos, { x: target.x, y: target.y, z: target.z, duration: duration, ease: ease });
+                if(p.isPhoto) gsap.to(p.mesh.scale, { x: 1, y: 1, z: 1, duration: 1 });
+            });
+            if(starMesh && starData) { const target = (newState === STATE.TREE) ? starData.treePos : starData.scatterPos; gsap.to(starData.currentPos, { x: target.x, y: target.y, z: target.z, duration: 2.2, ease: "power2.inOut" }); }
+            
+            if(trunkGroup) {
+                const targetY = (newState === STATE.TREE) ? 0 : -100; 
+                gsap.to(trunkGroup.position, { y: targetY, duration: 2.0, ease: "power2.inOut" });
+            }
+            if(ribbonMesh) {
+                 const targetScale = (newState === STATE.TREE) ? 1 : 0;
+                 gsap.to(ribbonMesh.scale, { x: targetScale, y: targetScale, z: targetScale, duration: 1.5, ease: "power2.inOut" });
+            }
+
+            if (newState === STATE.VIEW_PHOTO) {
+                const targetIndex = Math.floor(Math.random() * photoMeshes.length);
+                const p = particlesData.find(function(x) { return x.mesh === photoMeshes[targetIndex]; });
+                const v = new THREE.Vector3(0, 0, -22).applyMatrix4(camera.matrixWorld);
+                gsap.to(p.currentPos, { x: v.x, y: v.y, z: v.z, duration: 1.2 }); gsap.to(p.mesh.scale, { x: 2.5, y: 2.5, z: 2.5, duration: 1.2 });
+                p.mesh.lookAt(camera.position); if(controls) controls.autoRotate = false;
+            } else { if(controls) controls.autoRotate = true; }
+        }
+
+        function updateScene(time) {
+            let dirty = false;
+            if(snowSystem) {
+                const positions = snowSystem.geometry.attributes.position.array; const vels = snowSystem.userData.velocities;
+                for(let i=0; i<vels.length; i++) { positions[i*3+1] += vels[i].y; if(positions[i*3+1] < -60) positions[i*3+1] = 60; }
+                snowSystem.geometry.attributes.position.needsUpdate = true;
+            }
+            if(starMesh && starData) { if (currentState === STATE.SCATTER) starData.currentPos.y += Math.sin(time) * 0.03; starMesh.position.copy(starData.currentPos); starMesh.rotation.y = time * 0.5; }
+            particlesData.forEach(function(p, i) {
+                if (currentState === STATE.SCATTER) p.currentPos.y += Math.sin(time + i) * 0.01;
+                if (p.isPhoto) {
+                    p.mesh.position.copy(p.currentPos);
+                    if (currentState === STATE.TREE) { 
+                        p.mesh.lookAt(camera.position); 
+                    } else p.mesh.lookAt(camera.position);
+                } else {
+                    dummy.position.copy(p.currentPos);
+                    const blink = 0.8 + Math.sin(time * p.blinkSpeed + p.blinkPhase) * 0.4;
+                    dummy.scale.setScalar(p.scale * blink);
+                    dummy.updateMatrix(); instancesMesh.setMatrixAt(i, dummy.matrix); dirty = true;
+                }
+            });
+            if (dirty) instancesMesh.instanceMatrix.needsUpdate = true;
+        }
+
+        function animate() { requestAnimationFrame(animate); if (controls) controls.update(); updateScene(performance.now() * 0.001); renderer.render(scene, camera); }
+        init();
+        window.addEventListener('resize', function() { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+    </script>
+</body>
+</html>
